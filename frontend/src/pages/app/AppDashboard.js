@@ -171,6 +171,7 @@ export default function AppDashboard({ navigate, onLogout }) {
     { label: 'Create Ad Copy', page: 'ad-copy', icon: '📢' },
     { label: 'Write Email', page: 'email-campaign', icon: '✉️' },
     { label: 'View Calendar', page: 'content-calendar', icon: '📅' },
+    { label: 'Saved Templates', page: 'saved-emails', icon: '📧' },
   ];
 
   return (
@@ -230,7 +231,7 @@ export default function AppDashboard({ navigate, onLogout }) {
         {/* Quick Actions */}
         <div className="mb-8">
           <h2 className="text-xl font-semibold text-[#0A2540] mb-4">Quick Actions</h2>
-          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid sm:grid-cols-2 lg:grid-cols-5 gap-4">
             {quickActions.map((action, index) => (
               <Button
                 key={index}

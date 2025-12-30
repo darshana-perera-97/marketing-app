@@ -73,7 +73,7 @@ export default function AppLayout({ children, navigate, onLogout, activePage }) 
     { icon: LayoutDashboard, label: 'Dashboard', page: 'app-dashboard' },
     { icon: Share2, label: 'Social Media', page: 'social-media' },
     { icon: TrendingUp, label: 'Ad Copy', page: 'ad-copy' },
-    { icon: Mail, label: 'Email Campaigns', page: 'email-campaign' },
+    { icon: Mail, label: 'Bulk Campaign', page: 'email-campaign' },
     { icon: Calendar, label: 'Content Calendar', page: 'content-calendar' },
     { icon: History, label: 'History', page: 'history' },
     { icon: CreditCard, label: 'Credits & Billing', page: 'credits-billing' },

@@ -16,7 +16,6 @@ export default function SocialMediaGenerator({ navigate, onLogout }) {
     platform: 'instagram',
     postType: 'promotional',
     topic: '',
-    numberOfPosts: '3',
     tone: 'professional',
   });
 
@@ -33,7 +32,10 @@ export default function SocialMediaGenerator({ navigate, onLogout }) {
     try {
       const response = await apiRequest('/content/social-media', {
         method: 'POST',
-        body: JSON.stringify(formData)
+        body: JSON.stringify({
+          ...formData,
+          numberOfPosts: '1'
+        })
       });
 
       if (response.success) {
@@ -53,8 +55,28 @@ export default function SocialMediaGenerator({ navigate, onLogout }) {
     toast.success('Copied to clipboard!');
   };
 
-  const handleSave = (id) => {
-    toast.success('Saved to history!');
+  const handleSave = async (post) => {
+    try {
+      const response = await apiRequest('/emailers/save', {
+        method: 'POST',
+        body: JSON.stringify({
+          type: 'social-media',
+          content: post.content,
+          hashtags: post.hashtags,
+          imageUrl: post.imageUrl || null,
+          platform: formData.platform
+        })
+      });
+
+      if (response.success) {
+        toast.success(`Social media template saved! (${response.remaining} slots remaining)`);
+      } else {
+        toast.error(response.message || 'Failed to save template');
+      }
+    } catch (error) {
+      console.error('Save error:', error);
+      toast.error(error.message || 'Failed to save template');
+    }
   };
 
   return (
@@ -114,20 +136,6 @@ export default function SocialMediaGenerator({ navigate, onLogout }) {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="numberOfPosts">Number of Variations</Label>
-                <Select value={formData.numberOfPosts} onValueChange={(value) => setFormData({ ...formData, numberOfPosts: value })}>
-                  <SelectTrigger className="bg-input-background">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="1">1 variation</SelectItem>
-                    <SelectItem value="3">3 variations</SelectItem>
-                    <SelectItem value="5">5 variations</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-2">
                 <Label htmlFor="tone">Tone</Label>
                 <Select value={formData.tone} onValueChange={(value) => setFormData({ ...formData, tone: value })}>
                   <SelectTrigger className="bg-input-background">
@@ -162,7 +170,7 @@ export default function SocialMediaGenerator({ navigate, onLogout }) {
               </Button>
 
               <p className="text-sm text-gray-500 text-center">
-                Cost: {formData.numberOfPosts === '1' ? '10' : formData.numberOfPosts === '3' ? '25' : '40'} credits
+                Cost: 40 credits
               </p>
             </div>
           </Card>
@@ -183,6 +191,40 @@ export default function SocialMediaGenerator({ navigate, onLogout }) {
                 {generatedPosts.map((post) => (
                   <Card key={post.id} className="p-6">
                     <div className="mb-4">
+                      {/* Design Ideas */}
+                      {post.designIdeas && post.designIdeas.length > 0 ? (
+                        <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                          <div className="mb-3">
+                            <span className="text-xs font-semibold text-blue-800 uppercase tracking-wide">Design Ideas</span>
+                          </div>
+                          <div className="space-y-3">
+                            {post.designIdeas.slice(0, 3).map((idea, idx) => (
+                              <div key={idx} className="p-3 bg-white rounded border border-blue-100">
+                                <h4 className="font-semibold text-sm text-gray-900 mb-1">{idea.title || `Design Idea ${idx + 1}`}</h4>
+                                <p className="text-xs text-gray-700 mb-2">{idea.description}</p>
+                                <div className="flex flex-wrap gap-2 text-xs">
+                                  {idea.colors && (
+                                    <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded">Colors: {idea.colors}</span>
+                                  )}
+                                  {idea.style && (
+                                    <span className="px-2 py-1 bg-purple-100 text-purple-700 rounded">Style: {idea.style}</span>
+                                  )}
+                                </div>
+                                {idea.elements && (
+                                  <p className="text-xs text-gray-600 mt-2"><strong>Elements:</strong> {idea.elements}</p>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ) : post.designIdeasError ? (
+                        <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                          <p className="text-xs text-yellow-800">
+                            Design ideas generation failed: {post.designIdeasError}
+                          </p>
+                        </div>
+                      ) : null}
+                      
                       <p className="text-gray-900 whitespace-pre-wrap mb-4">{post.content}</p>
                       <p className="text-[#3B82F6] text-sm">{post.hashtags}</p>
                     </div>
@@ -198,7 +240,7 @@ export default function SocialMediaGenerator({ navigate, onLogout }) {
                       <Button 
                         size="sm" 
                         variant="outline"
-                        onClick={() => handleSave(post.id)}
+                        onClick={() => handleSave(post)}
                       >
                         <Save className="w-4 h-4 mr-2" />
                         Save

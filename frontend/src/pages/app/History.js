@@ -5,7 +5,7 @@ import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
 import { Badge } from '../../components/ui/badge';
-import { Search, Filter, Copy, Trash2, Download } from 'lucide-react';
+import { Search, Filter, Copy, Trash2, Download, ChevronLeft, ChevronRight } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiRequest } from '../../utils/api';
 
@@ -15,14 +15,26 @@ export default function History({ navigate, onLogout }) {
   const [viewMode, setViewMode] = useState('table');
   const [historyItems, setHistoryItems] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalItems, setTotalItems] = useState(0);
+  const itemsPerPage = 10;
+
+  useEffect(() => {
+    // Reset to page 1 when search or filter changes
+    setCurrentPage(1);
+  }, [searchTerm, filterTool]);
 
   useEffect(() => {
     // Fetch history from API
     const fetchHistory = async () => {
       try {
+        setIsLoading(true);
         const params = new URLSearchParams();
         if (searchTerm) params.append('search', searchTerm);
         if (filterTool !== 'all') params.append('filter', filterTool);
+        params.append('page', currentPage.toString());
+        params.append('limit', itemsPerPage.toString());
         
         const response = await apiRequest(`/content/history?${params.toString()}`);
         if (response.success) {
@@ -36,6 +48,8 @@ export default function History({ navigate, onLogout }) {
             })
           }));
           setHistoryItems(formatted);
+          setTotalPages(response.totalPages || 1);
+          setTotalItems(response.total || 0);
         }
       } catch (error) {
         console.error('Error fetching history:', error);
@@ -46,13 +60,27 @@ export default function History({ navigate, onLogout }) {
     };
 
     fetchHistory();
-  }, [searchTerm, filterTool]);
+  }, [searchTerm, filterTool, currentPage]);
 
-  const filteredItems = historyItems.filter(item => {
-    const matchesSearch = item.title.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesFilter = filterTool === 'all' || item.type === filterTool;
-    return matchesSearch && matchesFilter;
-  });
+  // Pagination handlers
+  const handlePreviousPage = () => {
+    if (currentPage > 1) {
+      setCurrentPage(currentPage - 1);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  };
+
+  const handleNextPage = () => {
+    if (currentPage < totalPages) {
+      setCurrentPage(currentPage + 1);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  };
+
+  const handlePageClick = (page) => {
+    setCurrentPage(page);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
   return (
     <AppLayout navigate={navigate} onLogout={onLogout} activePage="history">
@@ -119,7 +147,7 @@ export default function History({ navigate, onLogout }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredItems.map((item) => (
+                  {historyItems.map((item) => (
                     <tr key={item.id} className="border-b border-gray-100 hover:bg-gray-50">
                       <td className="py-4 px-6">
                         <Badge variant="outline">{item.type}</Badge>
@@ -164,7 +192,7 @@ export default function History({ navigate, onLogout }) {
 
         {viewMode === 'cards' && (
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {filteredItems.map((item) => (
+            {historyItems.map((item) => (
               <Card key={item.id} className="p-6">
                 <div className="flex items-start justify-between mb-4">
                   <Badge variant="outline">{item.type}</Badge>
@@ -212,9 +240,71 @@ export default function History({ navigate, onLogout }) {
           </Card>
         )}
 
-        {!isLoading && filteredItems.length === 0 && (
+        {!isLoading && historyItems.length === 0 && (
           <Card className="p-12 text-center">
             <p className="text-gray-600">No content found matching your filters</p>
+          </Card>
+        )}
+
+        {/* Pagination */}
+        {!isLoading && totalPages > 1 && (
+          <Card className="p-4 mt-6">
+            <div className="flex items-center justify-between">
+              <div className="text-sm text-gray-600">
+                Showing {((currentPage - 1) * itemsPerPage) + 1} to {Math.min(currentPage * itemsPerPage, totalItems)} of {totalItems} items
+              </div>
+              
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handlePreviousPage}
+                  disabled={currentPage === 1}
+                  className="flex items-center gap-1"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                  Previous
+                </Button>
+                
+                <div className="flex items-center gap-1">
+                  {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                    let pageNum;
+                    if (totalPages <= 5) {
+                      pageNum = i + 1;
+                    } else if (currentPage <= 3) {
+                      pageNum = i + 1;
+                    } else if (currentPage >= totalPages - 2) {
+                      pageNum = totalPages - 4 + i;
+                    } else {
+                      pageNum = currentPage - 2 + i;
+                    }
+                    
+                    return (
+                      <Button
+                        key={pageNum}
+                        variant={currentPage === pageNum ? 'default' : 'outline'}
+                        size="sm"
+                        onClick={() => handlePageClick(pageNum)}
+                        className="min-w-[40px]"
+                      >
+                        {pageNum}
+                      </Button>
+                    );
+                  })}
+                </div>
+                
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleNextPage}
+                  disabled={currentPage === totalPages}
+                  className="flex items-center gap-1"
+                >
+                  Next
+                  <ChevronRight className="w-4 h-4" />
+                </Button>
+              </div>
+            </div>
           </Card>
         )}
       </div>

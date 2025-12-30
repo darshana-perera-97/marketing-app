@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import AppLayout from '../../components/AppLayout';
 import { Card } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
-import { Check } from 'lucide-react';
+import { Check, ChevronLeft, ChevronRight } from 'lucide-react';
 import { apiRequest } from '../../utils/api';
 import { getUserData } from '../../utils/storage';
 
@@ -11,6 +11,10 @@ export default function CreditsAndBilling({ navigate, onLogout }) {
   const [totalCredits, setTotalCredits] = useState(5000);
   const [transactions, setTransactions] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalTransactions, setTotalTransactions] = useState(0);
+  const transactionsPerPage = 5;
 
   useEffect(() => {
     // Load from localStorage first
@@ -32,8 +36,12 @@ export default function CreditsAndBilling({ navigate, onLogout }) {
         console.error('Error fetching credits:', error);
       });
 
-    // Fetch transactions from API
-    apiRequest('/credits/transactions')
+    fetchTransactions();
+  }, [currentPage]);
+
+  const fetchTransactions = () => {
+    setIsLoading(true);
+    apiRequest(`/credits/transactions?page=${currentPage}&limit=${transactionsPerPage}`)
       .then(response => {
         if (response.success && response.transactions) {
           // Format dates
@@ -46,6 +54,8 @@ export default function CreditsAndBilling({ navigate, onLogout }) {
             })
           }));
           setTransactions(formatted);
+          setTotalPages(response.totalPages || 1);
+          setTotalTransactions(response.total || 0);
         }
       })
       .catch(error => {
@@ -54,7 +64,19 @@ export default function CreditsAndBilling({ navigate, onLogout }) {
       .finally(() => {
         setIsLoading(false);
       });
-  }, []);
+  };
+
+  const handlePreviousPage = () => {
+    if (currentPage > 1) {
+      setCurrentPage(currentPage - 1);
+    }
+  };
+
+  const handleNextPage = () => {
+    if (currentPage < totalPages) {
+      setCurrentPage(currentPage + 1);
+    }
+  };
 
   const usagePercentage = totalCredits > 0 ? ((totalCredits - currentCredits) / totalCredits) * 100 : 0;
 
@@ -120,23 +142,54 @@ export default function CreditsAndBilling({ navigate, onLogout }) {
             {isLoading ? (
               <p className="text-gray-600 text-center py-4">Loading transactions...</p>
             ) : (
-              <div className="space-y-3">
-                {transactions.length === 0 ? (
-                  <p className="text-gray-600 text-center py-4">No transactions yet</p>
-                ) : (
-                  transactions.map((transaction) => (
-                <div key={transaction.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                  <div>
-                    <p className="text-sm font-medium text-gray-900">{transaction.description}</p>
-                    <p className="text-xs text-gray-500">{transaction.date}</p>
-                  </div>
-                  <span className={`font-semibold ${transaction.amount > 0 ? 'text-green-600' : 'text-red-600'}`}>
-                    {transaction.amount > 0 ? '+' : ''}{transaction.amount}
-                  </span>
+              <>
+                <div className="space-y-3 mb-4">
+                  {transactions.length === 0 ? (
+                    <p className="text-gray-600 text-center py-4">No transactions yet</p>
+                  ) : (
+                    transactions.map((transaction) => (
+                      <div key={transaction.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                        <div>
+                          <p className="text-sm font-medium text-gray-900">{transaction.description}</p>
+                          <p className="text-xs text-gray-500">{transaction.date}</p>
+                        </div>
+                        <span className={`font-semibold ${transaction.amount > 0 ? 'text-green-600' : 'text-red-600'}`}>
+                          {transaction.amount > 0 ? '+' : ''}{transaction.amount}
+                        </span>
+                      </div>
+                    ))
+                  )}
                 </div>
-                  ))
+                
+                {/* Pagination */}
+                {totalPages > 1 && (
+                  <div className="flex items-center justify-between pt-4 border-t border-gray-200">
+                    <p className="text-xs text-gray-500">
+                      Page {currentPage} of {totalPages}
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handlePreviousPage}
+                        disabled={currentPage === 1}
+                        className="h-8 w-8 p-0"
+                      >
+                        <ChevronLeft className="w-4 h-4" />
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleNextPage}
+                        disabled={currentPage === totalPages}
+                        className="h-8 w-8 p-0"
+                      >
+                        <ChevronRight className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  </div>
                 )}
-              </div>
+              </>
             )}
           </Card>
         </div>

@@ -8,6 +8,7 @@ import { Textarea } from '../../components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
 import { Copy, Save, Sparkles, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
+import { apiRequest } from '../../utils/api';
 
 export default function AdCopyGenerator({ navigate, onLogout }) {
   const [isGenerating, setIsGenerating] = useState(false);
@@ -21,33 +22,30 @@ export default function AdCopyGenerator({ navigate, onLogout }) {
 
   const [generatedAds, setGeneratedAds] = useState([]);
 
-  const handleGenerate = () => {
+  const handleGenerate = async () => {
+    if (!formData.product || !formData.keyBenefit) {
+      toast.error('Please fill in all required fields');
+      return;
+    }
+
     setIsGenerating(true);
-    setTimeout(() => {
-      const mockAds = [
-        {
-          id: 1,
-          headline: "AI Marketing Made Simple",
-          description: "Generate high-converting content in seconds. Join 10,000+ marketers saving 20+ hours per week with AI-powered tools.",
-          cta: "Start Free Trial"
-        },
-        {
-          id: 2,
-          headline: "Save 20+ Hours Per Week",
-          description: "Automate your content creation with AI. Create social posts, ads, and emails instantly. No credit card required.",
-          cta: "Try It Free"
-        },
-        {
-          id: 3,
-          headline: "Marketing Automation That Works",
-          description: "Stop wasting time on content creation. Let AI do the heavy lifting while you focus on strategy. Get started today!",
-          cta: "Get Started Now"
-        },
-      ];
-      setGeneratedAds(mockAds);
+    
+    try {
+      const response = await apiRequest('/content/ad-copy', {
+        method: 'POST',
+        body: JSON.stringify(formData)
+      });
+
+      if (response.success) {
+        setGeneratedAds(response.ads);
+        toast.success(`Ad copy generated successfully! Used ${response.creditsUsed} credits.`);
+      }
+    } catch (error) {
+      console.error('Generation error:', error);
+      toast.error(error.message || 'Failed to generate ad copy');
+    } finally {
       setIsGenerating(false);
-      toast.success('Ad copy generated successfully!');
-    }, 2000);
+    }
   };
 
   return (

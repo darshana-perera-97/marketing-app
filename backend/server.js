@@ -1,7 +1,11 @@
+// Load environment variables from .env file
+require('dotenv').config();
+
 const express = require('express');
 const cors = require('cors');
 const { readJSONFile, writeJSONFile, getNextId, generateLongId } = require('./utils/fileStorage');
 const { hashPassword, verifyPassword, generateToken, verifyToken } = require('./utils/auth');
+const { generateEmailContent, generateWhatsAppContent, generateSocialMediaContent, generateImage, generateDesignIdeas, generateAdCopy } = require('./utils/openai');
 const app = express();
 const PORT = process.env.PORT || 5000;
 
@@ -400,7 +404,7 @@ app.get('/api/dashboard/stats', authenticateToken, (req, res) => {
 });
 
 // Content generation endpoints
-app.post('/api/content/social-media', authenticateToken, (req, res) => {
+app.post('/api/content/social-media', authenticateToken, async (req, res) => {
   try {
     const userId = req.userId;
     const { platform, postType, topic, numberOfPosts, tone } = req.body;
@@ -408,7 +412,8 @@ app.post('/api/content/social-media', authenticateToken, (req, res) => {
     // Check user credits
     const user = req.user;
     
-    const creditsNeeded = numberOfPosts === '1' ? 10 : numberOfPosts === '3' ? 25 : 40;
+    const numPosts = parseInt(numberOfPosts) || 1;
+    const creditsNeeded = numPosts === 1 ? 40 : numPosts === 3 ? 25 : 40;
     
     if (user.credits < creditsNeeded) {
       return res.status(400).json({
@@ -417,75 +422,147 @@ app.post('/api/content/social-media', authenticateToken, (req, res) => {
       });
     }
     
-    // Simulate AI generation delay
-    setTimeout(() => {
+    try {
+      // Generate social media content using OpenAI
+      let socialMediaPosts;
       try {
-        const mockPosts = [
+        console.log('Generating social media content with OpenAI...');
+        const aiResult = await generateSocialMediaContent(topic || '', {
+          platform: platform || 'instagram',
+          postType: postType || 'promotional',
+          tone: tone || 'professional',
+          numberOfPosts: numPosts
+        });
+        
+        if (aiResult && aiResult.success && aiResult.posts) {
+          socialMediaPosts = aiResult.posts;
+          console.log('Social media content generated successfully with OpenAI');
+        } else {
+          throw new Error('OpenAI returned invalid response');
+        }
+      } catch (aiError) {
+        console.error('OpenAI error:', aiError.message);
+        // Fallback to basic content if OpenAI fails
+        socialMediaPosts = [
           {
-            id: Date.now(),
             content: `🚀 ${topic || 'Transform your marketing strategy with AI!'} Our latest features help you create content that converts in seconds. Try it today and see the difference.\n\nReady to level up your marketing game? Click the link in bio!`,
-            hashtags: "#AIMarketing #MarketingTools #ContentCreation #DigitalMarketing #MarketingAutomation"
-          },
-          {
-            id: Date.now() + 1,
-            content: `💡 Did you know? ${topic || 'Businesses using AI for content creation save 20+ hours per week!'}\n\nImagine what you could do with that extra time. Our AI Marketing Assistant makes it possible.\n\nStart your free trial today! 👉 Link in bio`,
-            hashtags: "#ProductivityHacks #MarketingTips #AItools #BusinessGrowth #TimeManagement"
-          },
-          {
-            id: Date.now() + 2,
-            content: `✨ Say goodbye to writer's block! ${topic || 'Our AI generates high-quality content for all your marketing needs.'}\n\nJoin 10,000+ happy marketers today 🎯`,
-            hashtags: "#ContentMarketing #MarketingSolutions #AIAssistant #SocialMediaMarketing #GrowthHacking"
-          },
-        ];
-        
-        const generatedPosts = mockPosts.slice(0, parseInt(numberOfPosts) || 3);
-        
-        // Save to content.json
-        const content = readJSONFile('content.json');
-        generatedPosts.forEach((post, index) => {
-          content.push({
-            id: getNextId(content),
-            userId: userId,
-            type: 'Social Media',
-            title: `${platform} post - ${topic || 'Generated content'}`,
-            platform: platform,
+            hashtags: "#AIMarketing #MarketingTools #ContentCreation #DigitalMarketing #MarketingAutomation",
+            imagePrompt: `A professional ${postType} image related to ${topic || 'marketing'}, ${tone} tone, modern design, social media style`
+          }
+        ].slice(0, numPosts);
+        console.log('Using fallback social media content');
+      }
+      
+      // Generate design ideas for each post (no image sketch)
+      const postsWithImages = await Promise.all(
+        socialMediaPosts.map(async (post, index) => {
+          let designIdeas = null;
+          let designIdeasError = null;
+          
+          // Generate design ideas
+          try {
+            console.log(`Generating design ideas ${index + 1}...`);
+            const designResult = await generateDesignIdeas(post.content || topic || '', {
+              platform: platform || 'instagram',
+              postType: postType || 'promotional',
+              tone: tone || 'professional'
+            });
+            
+            if (designResult && designResult.success) {
+              designIdeas = designResult.designIdeas;
+              console.log(`Design ideas ${index + 1} generated successfully`);
+            }
+          } catch (designError) {
+            console.error(`Error generating design ideas ${index + 1}:`, designError.message);
+            designIdeasError = designError.message;
+            // Continue without design ideas if generation fails
+          }
+          
+          return {
+            id: Date.now() + index,
             content: post.content,
             hashtags: post.hashtags,
-            date: new Date().toISOString(),
-            credits: creditsNeeded / generatedPosts.length,
-            status: 'Draft'
-          });
+            imagePrompt: post.imagePrompt,
+            designIdeas: designIdeas,
+            designIdeasError: designIdeasError
+          };
+        })
+      );
+      
+      // Save to content.json (for history)
+      const content = readJSONFile('content.json');
+      postsWithImages.forEach((post, index) => {
+        content.push({
+          id: getNextId(content),
+          userId: userId,
+          type: 'Social Media',
+          title: `${platform} post - ${topic || 'Generated content'}`,
+          platform: platform,
+          content: post.content,
+          hashtags: post.hashtags,
+          date: new Date().toISOString(),
+          credits: creditsNeeded / postsWithImages.length,
+          status: 'Draft'
         });
-        writeJSONFile('content.json', content);
-        
-        // Deduct credits
-        user.credits -= creditsNeeded;
-        user.updatedAt = new Date().toISOString();
-        const users = readJSONFile('users.json');
-        const userIndex = users.findIndex(u => u.id === userId);
-        users[userIndex] = user;
-        writeJSONFile('users.json', users);
-        
-        // Update dashboard stats
-        updateDashboardStats(userId, 'Social Media', false);
-        
-        // Add admin activity
-        addAdminActivity(userId, user.email, `Generated ${numberOfPosts} social media posts`);
-        
-        res.json({
-          success: true,
-          posts: generatedPosts,
-          creditsUsed: creditsNeeded,
-          remainingCredits: user.credits
-        });
+      });
+      writeJSONFile('content.json', content);
+      
+      // Save to socialmediaposts.json
+      let savedSocialMediaPosts = [];
+      try {
+        savedSocialMediaPosts = readJSONFile('socialmediaposts.json');
       } catch (error) {
-        console.error('Error in social media generation callback:', error);
-        res.status(500).json({
-          success: false,
-          message: 'Internal server error'
-        });
+        // File doesn't exist yet, start with empty array
+        console.log('Creating new socialmediaposts.json file');
+        savedSocialMediaPosts = [];
       }
-    }, 1500);
+      
+      postsWithImages.forEach((post, index) => {
+        savedSocialMediaPosts.push({
+          id: generateLongId(),
+          userId: userId,
+          platform: platform || 'instagram',
+          postType: postType || 'promotional',
+          topic: topic || '',
+          tone: tone || 'professional',
+          content: post.content,
+          hashtags: post.hashtags,
+          imagePrompt: post.imagePrompt,
+          designIdeas: post.designIdeas || null,
+          designIdeasError: post.designIdeasError || null,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        });
+      });
+      writeJSONFile('socialmediaposts.json', savedSocialMediaPosts);
+      
+      // Deduct credits
+      user.credits -= creditsNeeded;
+      user.updatedAt = new Date().toISOString();
+      const users = readJSONFile('users.json');
+      const userIndex = users.findIndex(u => u.id === userId);
+      users[userIndex] = user;
+      writeJSONFile('users.json', users);
+      
+      // Update dashboard stats
+      updateDashboardStats(userId, 'Social Media', false);
+      
+      // Add admin activity
+      addAdminActivity(userId, user.email, `Generated ${numberOfPosts} social media posts`);
+      
+      res.json({
+        success: true,
+        posts: postsWithImages,
+        creditsUsed: creditsNeeded,
+        remainingCredits: user.credits
+      });
+    } catch (error) {
+      console.error('Error in social media generation:', error);
+      res.status(500).json({
+        success: false,
+        message: error.message || 'Internal server error'
+      });
+    }
   } catch (error) {
     console.error('Social media generation error:', error);
     res.status(500).json({
@@ -495,7 +572,7 @@ app.post('/api/content/social-media', authenticateToken, (req, res) => {
   }
 });
 
-app.post('/api/content/ad-copy', authenticateToken, (req, res) => {
+app.post('/api/content/ad-copy', authenticateToken, async (req, res) => {
   try {
     const userId = req.userId;
     const user = req.user;
@@ -510,74 +587,137 @@ app.post('/api/content/ad-copy', authenticateToken, (req, res) => {
       });
     }
     
-    setTimeout(() => {
+    try {
+      // Generate ad copy using OpenAI
+      let generatedAds;
       try {
-        const mockAds = [
+        console.log('Generating ad copy with OpenAI...');
+        const aiResult = await generateAdCopy(keyBenefit || product || '', {
+          platform: platform || 'google',
+          product: product || '',
+          targetAudience: targetAudience || '',
+          keyBenefit: keyBenefit || '',
+          cta: cta || 'learn-more'
+        });
+        
+        if (aiResult && aiResult.success && aiResult.ads) {
+          generatedAds = aiResult.ads.map((ad, index) => ({
+            id: Date.now() + index,
+            headline: ad.headline,
+            description: ad.description,
+            cta: ad.cta
+          }));
+          console.log('Ad copy generated successfully with OpenAI');
+        } else {
+          throw new Error('OpenAI returned invalid response');
+        }
+      } catch (aiError) {
+        console.error('OpenAI error:', aiError.message);
+        // Fallback to basic content if OpenAI fails
+        const ctaMap = {
+          'learn-more': 'Learn More',
+          'get-started': 'Get Started',
+          'try-free': 'Try Free',
+          'buy-now': 'Buy Now',
+          'sign-up': 'Sign Up'
+        };
+        const ctaText = ctaMap[cta] || cta || 'Learn More';
+        
+        generatedAds = [
           {
-            id: 1,
-            headline: `${product || 'AI Marketing Made Simple'}`,
-            description: `${keyBenefit || 'Generate high-converting content in seconds.'} Join 10,000+ marketers saving 20+ hours per week with AI-powered tools.`,
-            cta: cta || 'Start Free Trial'
+            id: Date.now(),
+            headline: product || 'Transform Your Business',
+            description: `${keyBenefit || 'Discover the solution you\'ve been looking for.'} Perfect for ${targetAudience || 'your business'}.`,
+            cta: ctaText
           },
           {
-            id: 2,
-            headline: `Save 20+ Hours Per Week`,
-            description: `Automate your content creation with AI. Create social posts, ads, and emails instantly. Perfect for ${targetAudience || 'marketers'}.`,
-            cta: cta || 'Try It Free'
+            id: Date.now() + 1,
+            headline: 'Get Started Today',
+            description: `${keyBenefit || 'Experience the difference.'} Join thousands of satisfied customers.`,
+            cta: ctaText
           },
           {
-            id: 3,
-            headline: `Marketing Automation That Works`,
-            description: `${keyBenefit || 'Stop wasting time on content creation.'} Let AI do the heavy lifting while you focus on strategy. Get started today!`,
-            cta: cta || 'Get Started Now'
-          },
+            id: Date.now() + 2,
+            headline: 'Join Thousands of Happy Customers',
+            description: `${keyBenefit || 'See why businesses choose us.'} Start your journey today.`,
+            cta: ctaText
+          }
         ];
-        
-        // Save to content.json
-        const content = readJSONFile('content.json');
-        mockAds.forEach((ad, index) => {
-          content.push({
-            id: getNextId(content),
-            userId: userId,
-            type: 'Ad Copy',
-            title: `${platform || 'Ad'} - ${ad.headline}`,
-            platform: platform || 'Google Ads',
-            content: `${ad.headline}\n\n${ad.description}\n\n${ad.cta}`,
-            date: new Date().toISOString(),
-            credits: creditsNeeded / mockAds.length,
-            status: 'Draft'
-          });
-        });
-        writeJSONFile('content.json', content);
-        
-        // Deduct credits
-        user.credits -= creditsNeeded;
-        user.updatedAt = new Date().toISOString();
-        const users = readJSONFile('users.json');
-        const userIndex = users.findIndex(u => u.id === userId);
-        users[userIndex] = user;
-        writeJSONFile('users.json', users);
-        
-        // Update dashboard stats
-        updateDashboardStats(userId, 'Ad Copy', false);
-        
-        // Add admin activity
-        addAdminActivity(userId, user.email, 'Generated ad copy');
-        
-        res.json({
-          success: true,
-          ads: mockAds,
-          creditsUsed: creditsNeeded,
-          remainingCredits: user.credits
-        });
-      } catch (error) {
-        console.error('Error in ad-copy generation callback:', error);
-        res.status(500).json({
-          success: false,
-          message: 'Internal server error'
-        });
+        console.log('Using fallback ad copy');
       }
-    }, 1500);
+      
+      // Save to content.json (for history)
+      const content = readJSONFile('content.json');
+      generatedAds.forEach((ad, index) => {
+        content.push({
+          id: getNextId(content),
+          userId: userId,
+          type: 'Ad Copy',
+          title: `${platform || 'Ad'} - ${ad.headline}`,
+          platform: platform || 'Google Ads',
+          content: `${ad.headline}\n\n${ad.description}\n\n${ad.cta}`,
+          date: new Date().toISOString(),
+          credits: creditsNeeded / generatedAds.length,
+          status: 'Draft'
+        });
+      });
+      writeJSONFile('content.json', content);
+      
+      // Save to adcopies.json
+      let savedAdCopies = [];
+      try {
+        savedAdCopies = readJSONFile('adcopies.json');
+      } catch (error) {
+        // File doesn't exist yet, start with empty array
+        console.log('Creating new adcopies.json file');
+        savedAdCopies = [];
+      }
+      
+      generatedAds.forEach((ad, index) => {
+        savedAdCopies.push({
+          id: generateLongId(),
+          userId: userId,
+          platform: platform || 'google',
+          product: product || '',
+          targetAudience: targetAudience || '',
+          keyBenefit: keyBenefit || '',
+          cta: cta || 'learn-more',
+          headline: ad.headline,
+          description: ad.description,
+          ctaText: ad.cta,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        });
+      });
+      writeJSONFile('adcopies.json', savedAdCopies);
+      
+      // Deduct credits
+      user.credits -= creditsNeeded;
+      user.updatedAt = new Date().toISOString();
+      const users = readJSONFile('users.json');
+      const userIndex = users.findIndex(u => u.id === userId);
+      users[userIndex] = user;
+      writeJSONFile('users.json', users);
+      
+      // Update dashboard stats
+      updateDashboardStats(userId, 'Ad Copy', false);
+      
+      // Add admin activity
+      addAdminActivity(userId, user.email, 'Generated ad copy');
+      
+      res.json({
+        success: true,
+        ads: generatedAds,
+        creditsUsed: creditsNeeded,
+        remainingCredits: user.credits
+      });
+    } catch (error) {
+      console.error('Error in ad-copy generation:', error);
+      res.status(500).json({
+        success: false,
+        message: error.message || 'Internal server error'
+      });
+    }
   } catch (error) {
     console.error('Ad copy generation error:', error);
     res.status(500).json({
@@ -587,11 +727,11 @@ app.post('/api/content/ad-copy', authenticateToken, (req, res) => {
   }
 });
 
-app.post('/api/content/email', authenticateToken, (req, res) => {
+app.post('/api/content/email', authenticateToken, async (req, res) => {
   try {
     const userId = req.userId;
     const user = req.user;
-    const { subject, purpose, tone } = req.body;
+    const { subject, purpose, tone, volume } = req.body;
     
     const creditsNeeded = 25;
     
@@ -602,58 +742,186 @@ app.post('/api/content/email', authenticateToken, (req, res) => {
       });
     }
     
-    setTimeout(() => {
+    try {
+      // Fetch email credentials for context
+      const credentials = readJSONFile('credentials.json');
+      const userCredentials = credentials.find(c => c.userId === userId);
+      const emailDetails = userCredentials ? {
+        email: userCredentials.email || '',
+        smtpHost: userCredentials.smtpHost || '',
+        smtpUsername: userCredentials.smtpUsername || ''
+      } : {};
+      
+      // Generate email content using OpenAI
+      let emailContent;
       try {
-        const emailContent = {
+        console.log('Generating email with OpenAI...');
+        const aiResult = await generateEmailContent(purpose || '', {
+          tone: tone || 'professional',
+          subject: subject || '',
+          purpose: purpose || '',
+          volume: volume || 'medium',
+          emailDetails: emailDetails
+        });
+        
+        if (aiResult && aiResult.success) {
+          emailContent = {
+            subject: aiResult.subject,
+            body: aiResult.body
+          };
+          console.log('Email generated successfully with OpenAI');
+        } else {
+          throw new Error('OpenAI returned invalid response');
+        }
+      } catch (aiError) {
+        console.error('OpenAI error:', aiError.message);
+        // Fallback to basic content if OpenAI fails
+        emailContent = {
           subject: subject || 'Transform Your Marketing with AI',
           body: `Hi there,\n\nI wanted to reach out and share something exciting with you. ${purpose || 'Our AI Marketing Assistant can help you create high-converting content in seconds.'}\n\nKey benefits:\n• Save 20+ hours per week\n• Generate content for all platforms\n• Maintain consistent brand voice\n• Scale your marketing efforts\n\nReady to get started? Click here to try it free!\n\nBest regards,\nThe Team`
         };
-        
-        // Save to content.json
-        const content = readJSONFile('content.json');
-        content.push({
-          id: getNextId(content),
-          userId: userId,
-          type: 'Email',
-          title: emailContent.subject,
-          platform: 'Email',
-          content: emailContent.body,
-          date: new Date().toISOString(),
-          credits: creditsNeeded,
-          status: 'Draft'
-        });
-        writeJSONFile('content.json', content);
-        
-        // Deduct credits
-        user.credits -= creditsNeeded;
-        user.updatedAt = new Date().toISOString();
-        const users = readJSONFile('users.json');
-        const userIndex = users.findIndex(u => u.id === userId);
-        users[userIndex] = user;
-        writeJSONFile('users.json', users);
-        
-        // Update dashboard stats
-        updateDashboardStats(userId, 'Email', false);
-        
-        // Add admin activity
-        addAdminActivity(userId, user.email, 'Generated email campaign');
-        
-        res.json({
-          success: true,
-          email: emailContent,
-          creditsUsed: creditsNeeded,
-          remainingCredits: user.credits
-        });
-      } catch (error) {
-        console.error('Error in email generation callback:', error);
-        res.status(500).json({
-          success: false,
-          message: 'Internal server error'
-        });
+        console.log('Using fallback email content');
       }
-    }, 1500);
+      
+      // Save to content.json
+      const content = readJSONFile('content.json');
+      content.push({
+        id: getNextId(content),
+        userId: userId,
+        type: 'Email',
+        title: emailContent.subject,
+        platform: 'Email',
+        content: emailContent.body,
+        date: new Date().toISOString(),
+        credits: creditsNeeded,
+        status: 'Draft'
+      });
+      writeJSONFile('content.json', content);
+      
+      // Deduct credits
+      user.credits -= creditsNeeded;
+      user.updatedAt = new Date().toISOString();
+      const users = readJSONFile('users.json');
+      const userIndex = users.findIndex(u => u.id === userId);
+      users[userIndex] = user;
+      writeJSONFile('users.json', users);
+      
+      // Update dashboard stats
+      updateDashboardStats(userId, 'Email', false);
+      
+      // Add admin activity
+      addAdminActivity(userId, user.email, 'Generated email campaign');
+      
+      res.json({
+        success: true,
+        email: emailContent,
+        creditsUsed: creditsNeeded,
+        remainingCredits: user.credits
+      });
+    } catch (error) {
+      console.error('Error in email generation:', error);
+      res.status(500).json({
+        success: false,
+        message: error.message || 'Failed to generate email content'
+      });
+    }
   } catch (error) {
     console.error('Email generation error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+});
+
+// WhatsApp campaign generation endpoint
+app.post('/api/content/whatsapp', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.userId;
+    const user = req.user;
+    const { purpose, tone, volume } = req.body;
+    
+    const creditsNeeded = 25;
+    
+    if (user.credits < creditsNeeded) {
+      return res.status(400).json({
+        success: false,
+        message: 'Insufficient credits'
+      });
+    }
+    
+    try {
+      // Generate WhatsApp message content using OpenAI
+      let whatsappContent;
+      try {
+        console.log('Generating WhatsApp message with OpenAI...');
+        const aiResult = await generateWhatsAppContent(purpose || '', {
+          tone: tone || 'friendly',
+          purpose: purpose || '',
+          volume: volume || 'medium'
+        });
+        
+        if (aiResult && aiResult.success) {
+          whatsappContent = {
+            message: aiResult.message
+          };
+          console.log('WhatsApp message generated successfully with OpenAI');
+        } else {
+          throw new Error('OpenAI returned invalid response');
+        }
+      } catch (aiError) {
+        console.error('OpenAI error:', aiError.message);
+        // Fallback to basic content if OpenAI fails
+        whatsappContent = {
+          message: `Hi! 👋\n\n${purpose || 'I wanted to share something exciting with you!'}\n\nKey benefits:\n✅ Save time\n✅ Get better results\n✅ Scale your business\n\nReady to get started? Let's chat! 🚀`
+        };
+        console.log('Using fallback WhatsApp content');
+      }
+      
+      // Save to content.json
+      const content = readJSONFile('content.json');
+      content.push({
+        id: getNextId(content),
+        userId: userId,
+        type: 'WhatsApp',
+        title: 'WhatsApp Campaign',
+        platform: 'WhatsApp',
+        content: whatsappContent.message,
+        date: new Date().toISOString(),
+        credits: creditsNeeded,
+        status: 'Draft'
+      });
+      writeJSONFile('content.json', content);
+      
+      // Deduct credits
+      user.credits -= creditsNeeded;
+      user.updatedAt = new Date().toISOString();
+      const users = readJSONFile('users.json');
+      const userIndex = users.findIndex(u => u.id === userId);
+      users[userIndex] = user;
+      writeJSONFile('users.json', users);
+      
+      // Update dashboard stats
+      updateDashboardStats(userId, 'WhatsApp', false);
+      
+      // Add admin activity
+      addAdminActivity(userId, user.email, 'Generated WhatsApp campaign');
+      
+      res.json({
+        success: true,
+        whatsapp: whatsappContent,
+        creditsUsed: creditsNeeded,
+        remainingCredits: user.credits
+      });
+    } catch (error) {
+      console.error('Error in WhatsApp generation:', error);
+      res.status(500).json({
+        success: false,
+        message: error.message || 'Failed to generate WhatsApp message'
+      });
+    }
+  } catch (error) {
+    console.error('WhatsApp generation error:', error);
     res.status(500).json({
       success: false,
       message: 'Internal server error'
@@ -739,13 +1007,13 @@ app.get('/api/credits', authenticateToken, (req, res) => {
 app.get('/api/credits/transactions', authenticateToken, (req, res) => {
   try {
     const userId = req.userId;
+    const { page = 1, limit = 10 } = req.query;
     const content = readJSONFile('content.json');
     
     // Get user's content and create transactions
-    const userContent = content
+    const allTransactions = content
       .filter(item => item.userId === userId)
       .sort((a, b) => new Date(b.date) - new Date(a.date))
-      .slice(0, 50) // Last 50 transactions
       .map(item => {
         // Check if it's a credit purchase
         if (item.type === 'Credit Purchase') {
@@ -767,9 +1035,18 @@ app.get('/api/credits/transactions', authenticateToken, (req, res) => {
         };
       });
     
+    // Pagination
+    const startIndex = (parseInt(page) - 1) * parseInt(limit);
+    const endIndex = startIndex + parseInt(limit);
+    const paginatedTransactions = allTransactions.slice(startIndex, endIndex);
+    
     res.json({
       success: true,
-      transactions: userContent
+      transactions: paginatedTransactions,
+      total: allTransactions.length,
+      page: parseInt(page),
+      limit: parseInt(limit),
+      totalPages: Math.ceil(allTransactions.length / parseInt(limit))
     });
   } catch (error) {
     console.error('Get transactions error:', error);
@@ -1362,6 +1639,474 @@ app.post('/api/brand/setup', authenticateToken, (req, res) => {
     });
   } catch (error) {
     console.error('Brand setup error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+});
+
+// Save template (email, whatsapp, or social-media) to emailers.json endpoint
+app.post('/api/emailers/save', authenticateToken, (req, res) => {
+  try {
+    const userId = req.userId;
+    const { subject, body, message, content, hashtags, imageUrl, platform, type = 'email' } = req.body;
+    
+    // Validate required fields based on type
+    if (type === 'email') {
+      if (!subject || !body) {
+        return res.status(400).json({
+          success: false,
+          message: 'Subject and body are required for email templates'
+        });
+      }
+    } else if (type === 'whatsapp') {
+      if (!message) {
+        return res.status(400).json({
+          success: false,
+          message: 'Message is required for WhatsApp templates'
+        });
+      }
+    } else if (type === 'social-media') {
+      if (!content || !hashtags) {
+        return res.status(400).json({
+          success: false,
+          message: 'Content and hashtags are required for social media templates'
+        });
+      }
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid template type. Must be "email", "whatsapp", or "social-media"'
+      });
+    }
+    
+    // Read existing templates
+    const templates = readJSONFile('emailers.json');
+    
+    // Filter all templates for this user (all types)
+    const userTemplates = templates.filter(template => template.userId === userId);
+    
+    // Check if user has reached the limit of 10 templates total
+    if (userTemplates.length >= 10) {
+      return res.status(400).json({
+        success: false,
+        message: 'You have reached the maximum limit of 10 saved templates. Please delete an existing template to save a new one.'
+      });
+    }
+    
+    // Create new template entry
+    const newTemplate = {
+      id: generateLongId(),
+      userId: userId,
+      type: type,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    
+    // Add type-specific fields
+    if (type === 'email') {
+      newTemplate.subject = subject;
+      newTemplate.body = body;
+    } else if (type === 'whatsapp') {
+      newTemplate.message = message;
+    } else if (type === 'social-media') {
+      newTemplate.content = content;
+      newTemplate.hashtags = hashtags;
+      newTemplate.platform = platform || 'instagram';
+      if (imageUrl) {
+        newTemplate.imageUrl = imageUrl;
+      }
+    }
+    
+    // Add to templates array
+    templates.push(newTemplate);
+    
+    // Save to file
+    const saved = writeJSONFile('emailers.json', templates);
+    
+    if (!saved) {
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to save template'
+      });
+    }
+    
+    const typeNames = {
+      'email': 'Email',
+      'whatsapp': 'WhatsApp',
+      'social-media': 'Social Media'
+    };
+    
+    res.json({
+      success: true,
+      message: `${typeNames[type] || type} template saved successfully`,
+      template: newTemplate,
+      totalSaved: userTemplates.length + 1,
+      remaining: 10 - (userTemplates.length + 1)
+    });
+  } catch (error) {
+    console.error('Save template error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+});
+
+// Get user's saved templates endpoint
+app.get('/api/emailers', authenticateToken, (req, res) => {
+  try {
+    const userId = req.userId;
+    const { type } = req.query; // Optional filter by type: 'email', 'whatsapp', or 'social-media'
+    
+    // Handle social-media type separately
+    if (type === 'social-media') {
+      try {
+        const socialMediaPosts = readJSONFile('socialmediaposts.json');
+        const userPosts = socialMediaPosts
+          .filter(post => post.userId === userId)
+          .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+        
+        // Get all templates count for remaining calculation
+        const templates = readJSONFile('emailers.json');
+        const allUserTemplates = templates.filter(t => t.userId === userId);
+        
+        res.json({
+          success: true,
+          templates: userPosts.map(post => ({
+            id: post.id,
+            type: 'social-media',
+            content: post.content,
+            hashtags: post.hashtags,
+            platform: post.platform,
+            postType: post.postType,
+            topic: post.topic,
+            tone: post.tone,
+            designIdeas: post.designIdeas,
+            createdAt: post.createdAt,
+            updatedAt: post.updatedAt
+          })),
+          total: userPosts.length,
+          totalAll: allUserTemplates.length + userPosts.length,
+          remaining: 10 - (allUserTemplates.length + userPosts.length)
+        });
+        return;
+      } catch (error) {
+        console.error('Error reading socialmediaposts.json:', error);
+        res.json({
+          success: true,
+          templates: [],
+          total: 0,
+          totalAll: 0,
+          remaining: 10
+        });
+        return;
+      }
+    }
+    
+    // Handle email and whatsapp types
+    const templates = readJSONFile('emailers.json');
+    
+    // Filter templates for this user and add default type for backward compatibility
+    let userTemplates = templates
+      .filter(template => template.userId === userId)
+      .map(template => {
+        // Add default type 'email' for templates without type (backward compatibility)
+        if (!template.type) {
+          template.type = 'email';
+        }
+        return template;
+      });
+    
+    // Filter by type if provided
+    if (type && (type === 'email' || type === 'whatsapp')) {
+      userTemplates = userTemplates.filter(template => template.type === type);
+    }
+    
+    // Sort by date (newest first)
+    userTemplates.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    
+    const allUserTemplates = templates.filter(t => t.userId === userId);
+    
+    // Include social media posts and ad copies count in totalAll
+    let socialMediaCount = 0;
+    try {
+      const socialMediaPosts = readJSONFile('socialmediaposts.json');
+      socialMediaCount = socialMediaPosts.filter(post => post.userId === userId).length;
+    } catch (error) {
+      // File might not exist yet
+    }
+    
+    let adCopyCount = 0;
+    try {
+      const adCopies = readJSONFile('adcopies.json');
+      adCopyCount = adCopies.filter(ad => ad.userId === userId).length;
+    } catch (error) {
+      // File might not exist yet
+    }
+    
+    res.json({
+      success: true,
+      templates: userTemplates,
+      total: userTemplates.length,
+      totalAll: allUserTemplates.length + socialMediaCount + adCopyCount,
+      remaining: 10 - (allUserTemplates.length + socialMediaCount + adCopyCount)
+    });
+  } catch (error) {
+    console.error('Get emailers error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+});
+
+// Update saved template endpoint
+app.put('/api/emailers/:id', authenticateToken, (req, res) => {
+  try {
+    const userId = req.userId;
+    const { id } = req.params;
+    const { subject, body, message, content, hashtags, imageUrl, platform, headline, description, cta, ctaText, type } = req.body;
+    
+    // Check if it's an ad copy
+    if (type === 'ad-copy') {
+      try {
+        const adCopies = readJSONFile('adcopies.json');
+        const adIndex = adCopies.findIndex(ad => ad.id === id && ad.userId === userId);
+        
+        if (adIndex === -1) {
+          return res.status(404).json({
+            success: false,
+            message: 'Ad copy not found or you do not have permission to edit it'
+          });
+        }
+        
+        if (!headline || !description || !ctaText) {
+          return res.status(400).json({
+            success: false,
+            message: 'Headline, description, and CTA are required for ad copies'
+          });
+        }
+        
+        adCopies[adIndex].headline = headline;
+        adCopies[adIndex].description = description;
+        adCopies[adIndex].ctaText = ctaText;
+        if (cta) {
+          adCopies[adIndex].cta = cta;
+        }
+        if (platform) {
+          adCopies[adIndex].platform = platform;
+        }
+        adCopies[adIndex].updatedAt = new Date().toISOString();
+        
+        writeJSONFile('adcopies.json', adCopies);
+        
+        res.json({
+          success: true,
+          message: 'Ad copy updated successfully',
+          template: adCopies[adIndex]
+        });
+        return;
+      } catch (error) {
+        console.error('Error updating ad copy:', error);
+        return res.status(500).json({
+          success: false,
+          message: 'Internal server error'
+        });
+      }
+    }
+    
+    // Check if it's a social media post
+    if (type === 'social-media') {
+      try {
+        const socialMediaPosts = readJSONFile('socialmediaposts.json');
+        const postIndex = socialMediaPosts.findIndex(post => post.id === id && post.userId === userId);
+        
+        if (postIndex === -1) {
+          return res.status(404).json({
+            success: false,
+            message: 'Social media post not found or you do not have permission to edit it'
+          });
+        }
+        
+        if (!content || !hashtags) {
+          return res.status(400).json({
+            success: false,
+            message: 'Content and hashtags are required for social media posts'
+          });
+        }
+        
+        socialMediaPosts[postIndex].content = content;
+        socialMediaPosts[postIndex].hashtags = hashtags;
+        if (platform) {
+          socialMediaPosts[postIndex].platform = platform;
+        }
+        socialMediaPosts[postIndex].updatedAt = new Date().toISOString();
+        
+        writeJSONFile('socialmediaposts.json', socialMediaPosts);
+        
+        res.json({
+          success: true,
+          message: 'Social media post updated successfully',
+          template: socialMediaPosts[postIndex]
+        });
+        return;
+      } catch (error) {
+        console.error('Error updating social media post:', error);
+        return res.status(500).json({
+          success: false,
+          message: 'Internal server error'
+        });
+      }
+    }
+    
+    // Handle email and whatsapp templates
+    const templates = readJSONFile('emailers.json');
+    
+    // Find template and verify ownership
+    const templateIndex = templates.findIndex(template => template.id === id && template.userId === userId);
+    
+    if (templateIndex === -1) {
+      return res.status(404).json({
+        success: false,
+        message: 'Template not found or you do not have permission to edit it'
+      });
+    }
+    
+    const template = templates[templateIndex];
+    
+    // Update based on template type
+    if (template.type === 'email') {
+      if (!subject || !body) {
+        return res.status(400).json({
+          success: false,
+          message: 'Subject and body are required for email templates'
+        });
+      }
+      templates[templateIndex].subject = subject;
+      templates[templateIndex].body = body;
+    } else if (template.type === 'whatsapp') {
+      if (!message) {
+        return res.status(400).json({
+          success: false,
+          message: 'Message is required for WhatsApp templates'
+        });
+      }
+      templates[templateIndex].message = message;
+    }
+    
+    templates[templateIndex].updatedAt = new Date().toISOString();
+    
+    // Save to file
+    writeJSONFile('emailers.json', templates);
+    
+    res.json({
+      success: true,
+      message: 'Template updated successfully',
+      template: templates[templateIndex]
+    });
+  } catch (error) {
+    console.error('Update template error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+});
+
+// Delete saved template endpoint
+app.delete('/api/emailers/:id', authenticateToken, (req, res) => {
+  try {
+    const userId = req.userId;
+    const { id } = req.params;
+    const { type } = req.query; // Optional type parameter to determine which file to check
+    
+    // Check if it's an ad copy
+    if (type === 'ad-copy') {
+      try {
+        const adCopies = readJSONFile('adcopies.json');
+        const adIndex = adCopies.findIndex(ad => ad.id === id && ad.userId === userId);
+        
+        if (adIndex === -1) {
+          return res.status(404).json({
+            success: false,
+            message: 'Ad copy not found or you do not have permission to delete it'
+          });
+        }
+        
+        adCopies.splice(adIndex, 1);
+        writeJSONFile('adcopies.json', adCopies);
+        
+        res.json({
+          success: true,
+          message: 'Ad copy deleted successfully'
+        });
+        return;
+      } catch (error) {
+        console.error('Error deleting ad copy:', error);
+        return res.status(500).json({
+          success: false,
+          message: 'Internal server error'
+        });
+      }
+    }
+    
+    // Check if it's a social media post
+    if (type === 'social-media') {
+      try {
+        const socialMediaPosts = readJSONFile('socialmediaposts.json');
+        const postIndex = socialMediaPosts.findIndex(post => post.id === id && post.userId === userId);
+        
+        if (postIndex === -1) {
+          return res.status(404).json({
+            success: false,
+            message: 'Social media post not found or you do not have permission to delete it'
+          });
+        }
+        
+        socialMediaPosts.splice(postIndex, 1);
+        writeJSONFile('socialmediaposts.json', socialMediaPosts);
+        
+        res.json({
+          success: true,
+          message: 'Social media post deleted successfully'
+        });
+        return;
+      } catch (error) {
+        console.error('Error deleting social media post:', error);
+        return res.status(500).json({
+          success: false,
+          message: 'Internal server error'
+        });
+      }
+    }
+    
+    // Handle email and whatsapp templates
+    const templates = readJSONFile('emailers.json');
+    
+    // Find template and verify ownership
+    const templateIndex = templates.findIndex(template => template.id === id && template.userId === userId);
+    
+    if (templateIndex === -1) {
+      return res.status(404).json({
+        success: false,
+        message: 'Template not found or you do not have permission to delete it'
+      });
+    }
+    
+    // Remove template
+    templates.splice(templateIndex, 1);
+    
+    // Save to file
+    writeJSONFile('emailers.json', templates);
+    
+    res.json({
+      success: true,
+      message: 'Template deleted successfully'
+    });
+  } catch (error) {
+    console.error('Delete template error:', error);
     res.status(500).json({
       success: false,
       message: 'Internal server error'
