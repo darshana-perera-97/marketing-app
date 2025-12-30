@@ -17,6 +17,7 @@ import Credentials from './pages/app/Credentials';
 import CredentialsEmail from './pages/app/CredentialsEmail';
 import CredentialsWhatsApp from './pages/app/CredentialsWhatsApp';
 import SavedEmails from './pages/app/SavedEmails';
+import Campaigns from './pages/app/Campaigns';
 import AdminDashboard from './pages/admin/AdminDashboard';
 import UserManagement from './pages/admin/UserManagement';
 import PlanManagement from './pages/admin/PlanManagement';
@@ -102,6 +103,8 @@ function App() {
         return <Credentials navigate={navigate} onLogout={handleLogout} />;
       case 'saved-emails':
         return <SavedEmails navigate={navigate} onLogout={handleLogout} />;
+      case 'campaigns':
+        return <Campaigns navigate={navigate} onLogout={handleLogout} />;
       case 'admin-dashboard':
         return <AdminDashboard navigate={navigate} onLogout={handleLogout} />;
       case 'admin-users':

@@ -15,7 +15,9 @@ import {
   UserCircle,
   Mail as MailIcon,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  FolderKanban,
+  ArrowLeft
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { getUserData } from '../utils/storage';
@@ -74,9 +76,15 @@ export default function AppLayout({ children, navigate, onLogout, activePage }) 
     { icon: Share2, label: 'Social Media', page: 'social-media' },
     { icon: TrendingUp, label: 'Ad Copy', page: 'ad-copy' },
     { icon: Mail, label: 'Bulk Campaign', page: 'email-campaign' },
-    { icon: Calendar, label: 'Content Calendar', page: 'content-calendar' },
     { icon: History, label: 'History', page: 'history' },
     { icon: CreditCard, label: 'Credits & Billing', page: 'credits-billing' },
+    { icon: FolderKanban, label: 'Campaigns', page: 'campaigns' },
+  ];
+
+  // Campaign manager menu items (shown when on campaigns page)
+  const campaignMenuItems = [
+    { icon: FolderKanban, label: 'Campaigns', page: 'campaigns' },
+    { icon: Calendar, label: 'Content Calendar', page: 'content-calendar' },
     { icon: Sparkles, label: 'Credentials', page: 'purchase-credits' },
   ];
 
@@ -167,7 +175,29 @@ export default function AppLayout({ children, navigate, onLogout, activePage }) 
         `}>
           <nav className="p-4 space-y-2 h-full overflow-y-auto relative flex flex-col">
             <div className="flex-1">
-              {menuItems.map((item) => {
+              {/* Back to Dashboard button - shown on Campaign Manager pages */}
+              {['campaigns', 'content-calendar', 'purchase-credits', 'credentials-email', 'credentials-whatsapp', 'credentials-facebook', 'credentials-instagram', 'credentials-linkedin'].includes(activePage) && (
+                <button
+                  onClick={() => {
+                    navigate('app-dashboard');
+                    setIsMobileMenuOpen(false);
+                  }}
+                  className={`
+                    w-full flex items-center gap-3 rounded-lg transition-colors mb-2
+                    ${isCollapsed ? 'justify-center px-3 py-3' : 'px-4 py-3'}
+                    text-gray-700 hover:bg-gray-100
+                  `}
+                  title={isCollapsed ? 'Back to Dashboard' : ''}
+                >
+                  <ArrowLeft className="w-5 h-5 flex-shrink-0" />
+                  {!isCollapsed && <span className="whitespace-nowrap">Back to Dashboard</span>}
+                </button>
+              )}
+              
+              {(['campaigns', 'content-calendar', 'purchase-credits', 'credentials-email', 'credentials-whatsapp', 'credentials-facebook', 'credentials-instagram', 'credentials-linkedin'].includes(activePage)
+                ? campaignMenuItems
+                : menuItems
+              ).map((item) => {
               const IconComponent = item.icon;
               return (
                 <button
